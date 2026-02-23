@@ -285,6 +285,7 @@ def main() -> None:
     history: List[Dict[str, str]] = []
     last_order_id: Optional[str] = None
     last_order_data: Optional[Dict[str, Any]] = None
+    turn_index = 0
 
     print(f"Добро пожаловать в поддержку {settings.brand_name}!")
     print("Задайте вопрос или используйте команды:")
@@ -304,6 +305,12 @@ def main() -> None:
             if user_input.lower() in {"/exit", "exit", "quit"}:
                 print("Спасибо, что обратились в поддержку. Хорошего дня!")
                 break
+
+            turn_index += 1
+            user_label = f"Вы({turn_index:02d})"
+            assistant_label = "Бот"
+
+            print(f"{user_label}: {user_input}")
 
             order_context = ""
             faq_context = ""
@@ -348,11 +355,14 @@ def main() -> None:
             history.append({"role": "user", "content": user_input})
             history.append({"role": "assistant", "content": answer})
 
-            print(answer)
+            print(f"{assistant_label}: {answer}")
 
             exchange_record: Dict[str, Any] = {
                 "ts": datetime.now().isoformat(),
                 "type": "exchange",
+                "turn": turn_index,
+                "user_label": user_label,
+                "assistant_label": assistant_label,
                 "user": user_input,
                 "assistant": answer,
                 "usage": {
