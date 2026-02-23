@@ -3,7 +3,7 @@
 Консольный бот поддержки магазина **Shoply** с:
 
 - диалогом с историей;
-- RAG по FAQ через embeddings (семантический поиск);
+- RAG по FAQ через **LangChain** (OpenAIEmbeddings + InMemoryVectorStore);
 - командой `/order <id>` по `data/orders.json`;
 - логированием сессий в `logs/session_*.jsonl` + учётом токенов (`usage`).
 

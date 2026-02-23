@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from langchain_core.documents import Document
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 
 @dataclass
@@ -21,6 +24,7 @@ class Settings:
     brand_name: str
     max_history_messages: int = 10
     max_completion_tokens: int = 200
+    faq_similarity_threshold: float = 0.6
 
 
 def load_settings() -> Settings:
@@ -44,10 +48,20 @@ def load_settings() -> Settings:
     )
 
 
-def init_openai_client(settings: Settings) -> OpenAI:
-    return OpenAI(
+def init_embeddings(settings: Settings) -> OpenAIEmbeddings:
+    return OpenAIEmbeddings(
+        model=settings.embedding_model,
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
+    )
+
+
+def init_llm(settings: Settings) -> ChatOpenAI:
+    return ChatOpenAI(
+        model=settings.chat_model,
+        api_key=settings.openai_api_key,
+        base_url=settings.openai_base_url,
+        max_tokens=settings.max_completion_tokens,
     )
 
 
@@ -73,95 +87,50 @@ def append_jsonl(path: Path, record: Dict[str, Any]) -> None:
         f.write("\n")
 
 
-def cosine_similarity(a: List[float], b: List[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = 0.0
-    norm_a = 0.0
-    norm_b = 0.0
-    for x, y in zip(a, b):
-        dot += x * y
-        norm_a += x * x
-        norm_b += y * y
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / ((norm_a ** 0.5) * (norm_b ** 0.5))
-
-
-def embed_text(client: OpenAI, settings: Settings, text: str) -> Tuple[List[float], Dict[str, int]]:
-    response = client.embeddings.create(
-        model=settings.embedding_model,
-        input=text,
-    )
-    embedding = response.data[0].embedding
-    usage_data: Dict[str, int] = {
-        "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
-        "completion_tokens": 0,
-        "total_tokens": getattr(response.usage, "total_tokens", 0),
-    }
-    return embedding, usage_data
-
-
-def prepare_faq_with_embeddings(
-    client: OpenAI,
-    settings: Settings,
+def build_faq_vector_store(
+    embeddings: OpenAIEmbeddings,
     faq_items: List[Dict[str, str]],
-) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
-    items_with_embeddings: List[Dict[str, Any]] = []
-    total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-
-    for item in faq_items:
-        question = item.get("q", "")
-        embedding, usage = embed_text(client, settings, question)
-        items_with_embeddings.append(
-            {
-                "q": question,
-                "a": item.get("a", ""),
-                "embedding": embedding,
-            }
+) -> InMemoryVectorStore:
+    store = InMemoryVectorStore(embeddings)
+    docs: List[Document] = []
+    for idx, item in enumerate(faq_items):
+        q = item.get("q", "")
+        a = item.get("a", "")
+        docs.append(
+            Document(
+                page_content=f"Вопрос: {q}\nОтвет: {a}",
+                metadata={"id": idx, "q": q, "a": a},
+            )
         )
-        for key in total_usage:
-            total_usage[key] += usage.get(key, 0)
-
-    return items_with_embeddings, total_usage
+    store.add_documents(docs)
+    return store
 
 
 def retrieve_faq_context(
-    client: OpenAI,
     settings: Settings,
-    faq_items: List[Dict[str, Any]],
+    faq_store: InMemoryVectorStore,
     query: str,
     max_items: int = 3,
-    similarity_threshold: float = 0.6,
-) -> Tuple[str, List[int], Dict[str, int]]:
-    query_embedding, usage = embed_text(client, settings, query)
+) -> Tuple[str, List[int]]:
+    results = faq_store.similarity_search_with_score(query=query, k=max_items)
 
-    scored: List[Tuple[int, float]] = []
-    for idx, item in enumerate(faq_items):
-        item_embedding = item.get("embedding")
-        if not isinstance(item_embedding, list):
-            continue
-        score = cosine_similarity(query_embedding, item_embedding)
-        scored.append((idx, score))
-
-    scored.sort(key=lambda pair: pair[1], reverse=True)
     top_indices: List[int] = []
-    for idx, score in scored[:max_items]:
-        if score < similarity_threshold:
+    lines: List[str] = ["Релевантные ответы из FAQ (используй их, если они подходят):"]
+    for doc, score in results:
+        if score < settings.faq_similarity_threshold:
             continue
-        top_indices.append(idx)
+        doc_id = doc.metadata.get("id")
+        if isinstance(doc_id, int):
+            top_indices.append(doc_id)
+        q = doc.metadata.get("q", "")
+        a = doc.metadata.get("a", "")
+        lines.append(f"- Вопрос: {q}")
+        lines.append(f"  Ответ: {a}")
 
     if not top_indices:
-        return "", top_indices, usage
+        return "", top_indices
 
-    lines: List[str] = ["Релевантные ответы из FAQ (используй их, если они подходят):"]
-    for idx in top_indices:
-        item = faq_items[idx]
-        lines.append(f"- Вопрос: {item.get('q', '')}")
-        lines.append(f"  Ответ: {item.get('a', '')}")
-
-    context_text = "\n".join(lines)
-    return context_text, top_indices, usage
+    return "\n".join(lines), top_indices
 
 
 def build_order_context(order_id: str, order_data: Optional[Dict[str, Any]]) -> str:
@@ -205,7 +174,7 @@ def truncate_history(
 
 
 def generate_answer(
-    client: OpenAI,
+    llm: ChatOpenAI,
     settings: Settings,
     history: List[Dict[str, str]],
     user_message: str,
@@ -219,51 +188,50 @@ def generate_answer(
         "Если нужной информации нет, честно скажи, что не знаешь, и предложи обратиться в поддержку, не выдумывай детали.",
     ]
 
-    system_message = {"role": "system", "content": " ".join(system_parts)}
+    system_message = SystemMessage(content=" ".join(system_parts))
 
-    context_messages: List[Dict[str, str]] = []
+    context_messages: List[BaseMessage] = []
     if faq_context:
-        context_messages.append(
-            {
-                "role": "system",
-                "content": f"FAQ контекст:\n{faq_context}",
-            }
-        )
+        context_messages.append(SystemMessage(content=f"FAQ контекст:\n{faq_context}"))
     if order_context:
-        context_messages.append(
-            {
-                "role": "system",
-                "content": f"Контекст по заказу:\n{order_context}",
-            }
-        )
+        context_messages.append(SystemMessage(content=f"Контекст по заказу:\n{order_context}"))
 
     truncated_history = truncate_history(history, settings.max_history_messages)
 
-    messages: List[Dict[str, str]] = [system_message]
+    lc_history: List[BaseMessage] = []
+    for msg in truncated_history:
+        role = msg.get("role")
+        content = msg.get("content", "")
+        if role == "user":
+            lc_history.append(HumanMessage(content=content))
+        elif role == "assistant":
+            lc_history.append(AIMessage(content=content))
+
+    messages: List[BaseMessage] = [system_message]
     messages.extend(context_messages)
-    messages.extend(truncated_history)
-    messages.append({"role": "user", "content": user_message})
+    messages.extend(lc_history)
+    messages.append(HumanMessage(content=user_message))
 
-    response = client.chat.completions.create(
-        model=settings.chat_model,
-        messages=messages,
-        max_completion_tokens=settings.max_completion_tokens,
-    )
+    ai_message: AIMessage = llm.invoke(messages)
+    content = ai_message.content or ""
 
-    content = response.choices[0].message.content or ""
-    usage_raw = response.usage
+    response_metadata = getattr(ai_message, "response_metadata", {}) or {}
+    token_usage = response_metadata.get("token_usage", {}) if isinstance(response_metadata, dict) else {}
+
     usage: Dict[str, int] = {
-        "prompt_tokens": getattr(usage_raw, "prompt_tokens", 0),
-        "completion_tokens": getattr(usage_raw, "completion_tokens", 0),
-        "total_tokens": getattr(usage_raw, "total_tokens", 0),
+        "prompt_tokens": int(token_usage.get("prompt_tokens", 0) or 0),
+        "completion_tokens": int(token_usage.get("completion_tokens", 0) or 0),
+        "total_tokens": int(token_usage.get("total_tokens", 0) or 0),
     }
+
     return content.strip(), usage
 
 
 def main() -> None:
     base_dir = Path(__file__).resolve().parent
     settings = load_settings()
-    client = init_openai_client(settings)
+    embeddings = init_embeddings(settings)
+    llm = init_llm(settings)
 
     data_dir = base_dir / "data"
     faq_raw: List[Dict[str, str]] = load_json(data_dir / "faq.json")
@@ -278,9 +246,7 @@ def main() -> None:
         "total_tokens": 0,
     }
 
-    faq_with_embeddings, faq_usage = prepare_faq_with_embeddings(client, settings, faq_raw)
-    for key in usage_total:
-        usage_total[key] += faq_usage.get(key, 0)
+    faq_store = build_faq_vector_store(embeddings, faq_raw)
 
     history: List[Dict[str, str]] = []
     last_order_id: Optional[str] = None
@@ -295,22 +261,36 @@ def main() -> None:
     try:
         while True:
             try:
-                user_input = input("> ").strip()
+                user_input = input(f"Вы({turn_index + 1:02d}): ").strip()
             except EOFError:
                 break
 
             if not user_input:
                 continue
 
-            if user_input.lower() in {"/exit", "exit", "quit"}:
-                print("Спасибо, что обратились в поддержку. Хорошего дня!")
+            user_input_lower = user_input.lower()
+            if user_input_lower in {"/exit", "exit", "quit", "стоп", "stop"}:
+                turn_index += 1
+                print("Бот: До свидания!")
+                append_jsonl(
+                    session_log_path,
+                    {
+                        "ts": datetime.now().isoformat(),
+                        "type": "exchange",
+                        "turn": turn_index,
+                        "user_label": f"Вы({turn_index:02d})",
+                        "assistant_label": "Бот",
+                        "user": user_input,
+                        "assistant": "До свидания!",
+                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                        "retrieval": {},
+                    },
+                )
                 break
 
             turn_index += 1
             user_label = f"Вы({turn_index:02d})"
             assistant_label = "Бот"
-
-            print(f"{user_label}: {user_input}")
 
             order_context = ""
             faq_context = ""
@@ -326,22 +306,19 @@ def main() -> None:
                 retrieval_info["order_id"] = order_id
                 retrieval_info["order_found"] = order_data is not None
             else:
-                faq_context, faq_indices, faq_query_usage = retrieve_faq_context(
-                    client=client,
+                faq_context, faq_indices = retrieve_faq_context(
                     settings=settings,
-                    faq_items=faq_with_embeddings,
+                    faq_store=faq_store,
                     query=user_input,
                 )
                 retrieval_info["faq_indices"] = faq_indices
-                for key in usage_total:
-                    usage_total[key] += faq_query_usage.get(key, 0)
                 if last_order_id is not None:
                     order_context = build_order_context(last_order_id, last_order_data)
                     retrieval_info["order_id"] = last_order_id
                     retrieval_info["order_found"] = last_order_data is not None
 
             answer, usage_chat = generate_answer(
-                client=client,
+                llm=llm,
                 settings=settings,
                 history=history,
                 user_message=user_input,
@@ -365,9 +342,7 @@ def main() -> None:
                 "assistant_label": assistant_label,
                 "user": user_input,
                 "assistant": answer,
-                "usage": {
-                    "chat": usage_chat,
-                },
+                "usage": usage_chat,
                 "retrieval": retrieval_info,
             }
             append_jsonl(session_log_path, exchange_record)
