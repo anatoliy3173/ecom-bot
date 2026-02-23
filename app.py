@@ -132,7 +132,7 @@ def retrieve_faq_context(
     faq_items: List[Dict[str, Any]],
     query: str,
     max_items: int = 3,
-    similarity_threshold: float = 0.75,
+    similarity_threshold: float = 0.6,
 ) -> Tuple[str, List[int], Dict[str, int]]:
     query_embedding, usage = embed_text(client, settings, query)
 
@@ -283,6 +283,8 @@ def main() -> None:
         usage_total[key] += faq_usage.get(key, 0)
 
     history: List[Dict[str, str]] = []
+    last_order_id: Optional[str] = None
+    last_order_data: Optional[Dict[str, Any]] = None
 
     print(f"Добро пожаловать в поддержку {settings.brand_name}!")
     print("Задайте вопрос или используйте команды:")
@@ -312,6 +314,8 @@ def main() -> None:
                 order_id = order_match.group(1)
                 order_data = orders.get(order_id)
                 order_context = build_order_context(order_id, order_data)
+                last_order_id = order_id
+                last_order_data = order_data
                 retrieval_info["order_id"] = order_id
                 retrieval_info["order_found"] = order_data is not None
             else:
@@ -324,6 +328,10 @@ def main() -> None:
                 retrieval_info["faq_indices"] = faq_indices
                 for key in usage_total:
                     usage_total[key] += faq_query_usage.get(key, 0)
+                if last_order_id is not None:
+                    order_context = build_order_context(last_order_id, last_order_data)
+                    retrieval_info["order_id"] = last_order_id
+                    retrieval_info["order_found"] = last_order_data is not None
 
             answer, usage_chat = generate_answer(
                 client=client,
