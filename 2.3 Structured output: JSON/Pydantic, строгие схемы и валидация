@@ -1,0 +1,51 @@
+import sys
+import json
+from langchain_openai import ChatOpenAI
+from langchain.prompts import PromptTemplate
+from langchain.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, ValidationError
+
+
+class WeatherInfo(BaseModel):
+    city: str
+    temperature: float
+    condition: str
+
+
+def main():
+    try:
+        city = sys.argv[1] if len(sys.argv) > 1 else "London"
+
+        parser = PydanticOutputParser(pydantic_object=WeatherInfo)
+
+        prompt = PromptTemplate(
+            template="""
+Provide weather information for the city.
+
+{format_instructions}
+
+City: {city}
+""",
+            input_variables=["city"],
+            partial_variables={
+                "format_instructions": parser.get_format_instructions()
+            },
+        )
+
+        model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+        chain = prompt | model | parser
+
+        result = chain.invoke({"city": city})
+
+        print(result.model_dump_json())
+
+    except ValidationError as e:
+        print(json.dumps({"error": "Invalid response format", "details": str(e)}))
+
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+
+
+if __name__ == "__main__":
+    main()
