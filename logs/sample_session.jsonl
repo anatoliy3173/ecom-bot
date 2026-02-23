@@ -1,0 +1,4 @@
+{"ts":"2026-02-23T18:00:00","type":"exchange","user":"Я хочу вернуть деньги за товар","assistant":"Возврат можно оформить в течение 14 дней: сохраните чек и упаковку. Если хотите, подскажите номер заказа — проверю статус.","usage":{"chat":{"prompt_tokens":120,"completion_tokens":28,"total_tokens":148}},"retrieval":{"faq_indices":[0]}}
+{"ts":"2026-02-23T18:00:10","type":"exchange","user":"/order 12345","assistant":"Заказ 12345 сейчас в пути, ориентировочно доставим через 2 дня (ShoplyExpress). Если нужно — помогу уточнить адрес или способ получения.","usage":{"chat":{"prompt_tokens":150,"completion_tokens":35,"total_tokens":185}},"retrieval":{"order_id":"12345","order_found":true}}
+{"ts":"2026-02-23T18:00:20","type":"summary","usage_total":{"prompt_tokens":270,"completion_tokens":63,"total_tokens":333}}
+
