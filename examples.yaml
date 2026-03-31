@@ -1,0 +1,66 @@
+- question: "Как отсортировать список по длине строк?"
+  answer: |
+    Используй встроенную функцию `sorted()` с параметром `key`:
+
+    ```python
+    words = ["banana", "pie", "Washington", "a"]
+    result = sorted(words, key=len)
+    print(result)  # ['a', 'pie', 'banana', 'Washington']
+    ```
+
+    Параметр `key=len` указывает, что сортировка идёт по длине каждого элемента.
+
+- question: "Как безопасно прочитать файл?"
+  answer: |
+    Используй контекстный менеджер `with`, чтобы файл автоматически закрылся:
+
+    ```python
+    with open("data.txt", "r", encoding="utf-8") as f:
+        content = f.read()
+    print(content)
+    ```
+
+    Конструкция `with` гарантирует закрытие файла даже при возникновении ошибки.
+
+- question: "Как создать словарь из двух списков?"
+  answer: |
+    Используй функцию `zip()` вместе с `dict()`:
+
+    ```python
+    keys = ["name", "age", "city"]
+    values = ["Alice", 30, "Moscow"]
+    result = dict(zip(keys, values))
+    print(result)  # {{'name': 'Alice', 'age': 30, 'city': 'Moscow'}}
+    ```
+
+    Функция `zip()` объединяет элементы попарно, а `dict()` превращает пары в словарь.
+
+- question: "Как сделать HTTP-запрос и получить JSON?"
+  answer: |
+    Используй библиотеку `requests`:
+
+    ```python
+    import requests
+
+    response = requests.get("https://api.github.com/users/octocat")
+    data = response.json()
+    print(data["login"])  # octocat
+    ```
+
+    Метод `.json()` автоматически парсит тело ответа в словарь Python.
+
+- question: "Как обработать несколько типов ошибок?"
+  answer: |
+    Используй несколько блоков `except` или кортеж исключений:
+
+    ```python
+    try:
+        value = int(input("Введите число: "))
+        result = 100 / value
+    except ValueError:
+        print("Это не число!")
+    except ZeroDivisionError:
+        print("На ноль делить нельзя!")
+    ```
+
+    Каждый `except` ловит свой тип ошибки. Порядок: от частного к общему.

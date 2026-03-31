@@ -29,3 +29,29 @@ python3 app.py
 
 - `OPENAI_BASE_URL=https://api.openai.com/v1`
 
+## Few-Shot Tips Bot
+
+Бот программных советов на Python с `FewShotPromptTemplate`. Примеры хранятся в `examples.yaml`.
+
+### Запуск (все примеры в промпте)
+
+```bash
+python3 few_shot_tips.py
+```
+
+### Запуск с SemanticSimilarityExampleSelector
+
+Выбирает 2 самых релевантных примера из базы через эмбеддинги:
+
+```bash
+python3 few_shot_tips.py --use-selector
+```
+
+### Формат examples.yaml
+
+```yaml
+- question: "Вопрос пользователя"
+  answer: |
+    Пояснение и пример кода.
+```
+
