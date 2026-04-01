@@ -2,4 +2,5 @@
 logs/session_*.jsonl
 __pycache__/
 *.pyc
+.venv/
 
